@@ -6,6 +6,8 @@ Sistema descentralizado para registrar y verificar la autenticidad de certificad
 **Curso:** TICS0870 Blockchain  
 **Universidad:** Universidad Adolfo Ibáñez
 
+**Aplicación desplegada**: [CertiChain](https://proyecto-blockchain-two.vercel.app)
+
 
 ## ¿Qué hace este proyecto?
 
