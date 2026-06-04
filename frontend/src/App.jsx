@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ethers } from 'ethers'
 import './index.css'
+import logoSvg from './assets/logo.svg'
 
 // Dirección del contrato desplegado en Sepolia y su ABI mínimo
 const CONTRACT_ADDRESS = '0x73ee4f0D0898180Eb30e6887188245c50E9a54Cc'
@@ -207,7 +208,7 @@ export default function App() {
       <header className="header">
         <div className="header-inner">
           <div className="logo">
-            <img src="/src/assets/logo.svg" alt="CertiChain" style={{width: '42px', height: '36px', flexShrink: 0}} />
+            <img src={logoSvg} alt="CertiChain" style={{width: '42px', height: '36px', flexShrink: 0}} />
             <span>CertiChain</span>
           </div>
           {!wallet ? (
