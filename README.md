@@ -11,20 +11,20 @@ Sistema descentralizado para registrar y verificar la autenticidad de certificad
 
 Permite a instituciones autorizadas registrar el hash criptográfico de un certificado en la blockchain de Ethereum, y a cualquier persona verificar si un certificado es auténtico consultando ese hash.
 
-El sistema **nunca almacena el archivo PDF**, solo su huella digital (hash keccak256). Esto garantiza privacidad, reduce costos y hace imposible alterar un certificado sin que el sistema lo detecte.
+El sistema **nunca almacena el archivo PDF**, solo su huella digital (hash SHA-256). Esto garantiza privacidad, reduce costos y hace imposible alterar un certificado sin que el sistema lo detecte.
 
 
 ## ¿Cómo funciona?
 
 ### Flujo de registro
 1. Una institución autorizada sube un PDF a la interfaz web.
-2. La aplicación calcula el hash keccak256 del archivo localmente.
+2. La aplicación calcula el hash SHA-256 del archivo localmente en el navegador.
 3. Se envía una transacción al contrato inteligente con ese hash.
 4. El contrato verifica que la wallet esté autorizada y registra el hash en la blockchain.
 
 ### Flujo de verificación
 1. Cualquier usuario sube un PDF a la interfaz web.
-2. La aplicación calcula el hash keccak256 del archivo localmente.
+2. La aplicación calcula el hash SHA-256 del archivo localmente en el navegador.
 3. Se consulta el contrato inteligente con ese hash.
 4. Si el hash existe en la blockchain, el certificado es auténtico.
 5. Si no existe, el certificado no fue registrado o fue modificado.
@@ -34,11 +34,11 @@ El sistema **nunca almacena el archivo PDF**, solo su huella digital (hash kecca
 
 ### Roles y permisos
 
-El contrato maneja dos niveles de acceso:
+El contrato maneja tres niveles de acceso:
 
 | Rol | Cantidad | Puede hacer |
 |-----|----------|-------------|
-| **Owner** | 1 (quien desplegó el contrato) | Autorizar y revocar issuers |
+| **Owner** | 1 (quien desplegó el contrato) | Autorizar y revocar issuers, registrar certificados |
 | **Issuer autorizado** | Múltiples | Registrar certificados |
 | **Cualquier usuario** | Ilimitado | Verificar certificados (solo lectura) |
 
@@ -78,6 +78,7 @@ Cada acción importante queda registrada como evento en la blockchain:
 | React + Vite | Interfaz web |
 | Ethers.js | Conexión frontend con blockchain |
 | MetaMask | Wallet y firma de transacciones |
+| Bootstrap Icons | Iconografía de la interfaz |
 | Sepolia | Red de prueba de Ethereum |
 | Vercel | Deploy del frontend |
 
@@ -95,6 +96,14 @@ ProyectoBlockchain/
 │   ├── lib/
 │   └── foundry.toml
 └── frontend/
+    ├── src/
+    │   ├── App.jsx
+    │   ├── index.css
+    │   ├── main.jsx
+    │   └── assets/
+    │       └── logo.svg
+    ├── index.html
+    └── package.json
 ```
 
 
@@ -103,26 +112,38 @@ ProyectoBlockchain/
 ### Requisitos
 
 - [Foundry](https://book.getfoundry.sh/getting-started/installation)
+- Node.js v20.19 o superior
 - Git Bash o terminal Unix
 
 ### Instalación
 
 ```bash
 git clone <url-del-repo>
-cd ProyectoBlockchain/contracts
-forge install
+cd ProyectoBlockchain
 ```
 
-### Compilar
+### Contrato
 
 ```bash
 cd contracts
+forge install
 forge build
 ```
 
-### Correr tests
+### Frontend
 
 ```bash
+cd frontend
+npm install
+npm run dev
+```
+
+La app queda disponible en http://localhost:5173.
+
+### Correr tests del contrato
+
+```bash
+cd contracts
 forge test -v
 ```
 
@@ -134,6 +155,50 @@ Los tests verifican:
 - ✅ Un hash no registrado devuelve `false`.
 - ✅ Solo el owner puede revocar issuers (revierte con `NotOwner`).
 - ✅ El evento `CertificateRegistered` se emite correctamente.
+
+
+## Interfaz Web
+
+La interfaz está desplegada en Vercel y puede usarse directamente desde el navegador sin instalar nada.
+
+### Conectar wallet
+
+Al ingresar a la aplicación se muestra un botón para conectar MetaMask. Una vez conectada, el sistema consulta al contrato si la wallet tiene permisos y muestra las pestañas correspondientes.
+
+### Pestañas disponibles según rol
+
+| Pestaña | Quién la ve |
+|---------|-------------|
+| Registrar certificado | Issuers autorizados y owner |
+| Verificar certificado | Todos los usuarios |
+| Administrar | Solo el owner |
+
+### Registrar un certificado
+
+1. Ir a la pestaña **Registrar certificado**.
+2. Hacer clic en el área de carga y seleccionar un archivo PDF.
+3. Hacer clic en **Registrar en blockchain**.
+4. MetaMask mostrará una ventana para confirmar la transacción.
+5. Una vez confirmada, aparecerá un mensaje de éxito en verde.
+
+Posibles errores:
+- **Este certificado ya fue registrado anteriormente:** el PDF ya existe en la blockchain.
+- **Tu wallet no está autorizada:** la wallet conectada no tiene permisos de issuer.
+
+### Verificar un certificado
+
+1. Ir a la pestaña **Verificar certificado** (no requiere wallet conectada).
+2. Seleccionar el PDF a verificar.
+3. Hacer clic en **Verificar certificado**.
+4. Si el hash está registrado, aparece un mensaje verde confirmando autenticidad.
+5. Si no está registrado, aparece un mensaje rojo indicando que el documento no fue registrado o fue modificado.
+
+### Administrar issuers (solo owner)
+
+1. Ir a la pestaña **Administrar**.
+2. Ingresar la dirección de la wallet a gestionar.
+3. Hacer clic en **Autorizar wallet** para darle permisos de issuer.
+4. Hacer clic en **Revocar wallet** para quitarle los permisos.
 
 
 ## Interactuar con el contrato sin interfaz (terminal)
@@ -233,17 +298,6 @@ cast call $CONTRACT "verifyCertificate(bytes32)(bool)" \
   0x1234000000000000000000000000000000000000000000000000000000000000 \
   --rpc-url http://127.0.0.1:8545
 ```
-
-
-## Interfaz Web
-
-En desarrollo, próximamente.
-
-La interfaz web permitirá:
-- Conectar wallet con MetaMask.
-- Registrar certificados subiendo un PDF (solo issuers autorizados).
-- Verificar certificados subiendo un PDF (cualquier usuario).
-- Ver el estado del certificado en tiempo real.
 
 
 ## Seguridad
