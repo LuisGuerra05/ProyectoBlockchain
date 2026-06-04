@@ -1,0 +1,9 @@
+# Foundry
+contracts/out/
+contracts/cache/
+out/
+cache/
+
+# General
+.env
+node_modules/
