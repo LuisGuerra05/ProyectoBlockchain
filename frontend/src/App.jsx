@@ -1,122 +1,279 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect } from 'react'
+import { ethers } from 'ethers'
+import './index.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+// Dirección del contrato desplegado en Sepolia y su ABI mínimo
+const CONTRACT_ADDRESS = '0x73ee4f0D0898180Eb30e6887188245c50E9a54Cc'
+const CONTRACT_ABI = [
+  'function registerCertificate(bytes32 certHash) external',
+  'function verifyCertificate(bytes32 certHash) external view returns (bool)',
+  'function authorizedIssuers(address) external view returns (bool)',
+]
+
+export default function App() {
+  const [wallet, setWallet] = useState(null)
+  const [isAuthorized, setIsAuthorized] = useState(false)
+  const [activeTab, setActiveTab] = useState('verify')
+
+  // Estado para el flujo de registro
+  const [regFile, setRegFile] = useState(null)
+  const [regStatus, setRegStatus] = useState(null)
+  const [regLoading, setRegLoading] = useState(false)
+
+  // Estado para el flujo de verificación
+  const [verFile, setVerFile] = useState(null)
+  const [verStatus, setVerStatus] = useState(null)
+  const [verLoading, setVerLoading] = useState(false)
+
+  // Al cargar la página, verifica si MetaMask ya tenía una sesión activa
+  useEffect(() => {
+    async function checkConnection() {
+      if (!window.ethereum) return
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' })
+      if (accounts.length > 0) {
+        const provider = new ethers.BrowserProvider(window.ethereum)
+        const signer = await provider.getSigner()
+        const address = await signer.getAddress()
+        setWallet(address)
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
+        const authorized = await contract.authorizedIssuers(address)
+        setIsAuthorized(authorized)
+        if (authorized) setActiveTab('register')
+      }
+    }
+    checkConnection()
+  }, [])
+
+  // Solicita acceso a MetaMask, obtiene la dirección y verifica si está autorizada en el contrato
+  async function connectWallet() {
+    if (!window.ethereum) {
+      alert('MetaMask no está instalado.')
+      return
+    }
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
+      const address = await signer.getAddress()
+      setWallet(address)
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
+      const authorized = await contract.authorizedIssuers(address)
+      setIsAuthorized(authorized)
+      if (authorized) setActiveTab('register')
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  // Limpia todos los estados para simular un cierre de sesión
+  function disconnectWallet() {
+    setWallet(null)
+    setIsAuthorized(false)
+    setActiveTab('verify')
+    setRegFile(null)
+    setVerFile(null)
+    setRegStatus(null)
+    setVerStatus(null)
+  }
+
+  // Calcula el hash SHA-256 del archivo para enviarlo al contrato
+  async function hashFile(file) {
+    const buffer = await file.arrayBuffer()
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
+    return '0x' + Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+
+  // Calcula el hash del PDF y envía una transacción al contrato para registrarlo
+  async function handleRegister() {
+    if (!regFile) return
+    setRegLoading(true)
+    setRegStatus(null)
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
+      const hash = await hashFile(regFile)
+      const tx = await contract.registerCertificate(hash)
+      await tx.wait()
+      setRegStatus({ type: 'success', msg: 'Certificado registrado exitosamente en la blockchain.' })
+      setRegFile(null)
+    } catch (err) {
+      const msg = err?.reason || err?.message || 'Error desconocido'
+      if (msg.includes('AlreadyRegistered')) {
+        setRegStatus({ type: 'error', msg: 'Este certificado ya fue registrado anteriormente.' })
+      } else if (msg.includes('NotAuthorized')) {
+        setRegStatus({ type: 'error', msg: 'Tu wallet no está autorizada para registrar certificados.' })
+      } else {
+        setRegStatus({ type: 'error', msg: 'Error al registrar: ' + msg })
+      }
+    }
+    setRegLoading(false)
+    // El mensaje desaparece automáticamente después de 5 segundos
+    setTimeout(() => setRegStatus(null), 5000)
+  }
+
+  // Calcula el hash del PDF y consulta el contrato para verificar si está registrado
+  async function handleVerify() {
+    if (!verFile) return
+    setVerLoading(true)
+    setVerStatus(null)
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const hash = await hashFile(verFile)
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
+      const exists = await contract.verifyCertificate(hash)
+      if (exists) {
+        setVerStatus({ type: 'success', msg: 'Certificado auténtico. Este documento está registrado en la blockchain.' })
+      } else {
+        setVerStatus({ type: 'error', msg: 'Certificado no encontrado. Este documento no fue registrado o fue modificado.' })
+      }
+    } catch (err) {
+      setVerStatus({ type: 'error', msg: 'Error al verificar: ' + (err?.message || 'Error desconocido') })
+    }
+    setVerLoading(false)
+    // El mensaje desaparece automáticamente después de 5 segundos
+    setTimeout(() => setVerStatus(null), 5000)
+  }
 
   return (
-    <>
-      <section id="center">
+    <div className="app">
+      <header className="header">
+        <div className="header-inner">
+          <div className="logo">
+            <img src="/src/assets/logo.svg" alt="CertiChain" style={{width: '42px', height: '36px', flexShrink: 0}} />
+            <span>CertiChain</span>
+          </div>
+          {!wallet ? (
+            <button className="btn-connect" onClick={connectWallet}>
+              <i className="bi bi-wallet2"></i> Conectar wallet
+            </button>
+          ) : (
+            <div className="wallet-info">
+              <i className="bi bi-circle-fill connected-dot"></i>
+              <span>{wallet.slice(0, 6)}...{wallet.slice(-4)}</span>
+              {isAuthorized && <span className="badge-authorized">Autorizado</span>}
+              <button className="btn-disconnect" onClick={disconnectWallet}>
+                <i className="bi bi-box-arrow-right"></i> Salir
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <main className="main">
         <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+          <h1>Verificación de certificados en blockchain</h1>
+          <p>Registra y verifica la autenticidad de certificados académicos de forma descentralizada e inalterable.</p>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+        {/* Si no hay wallet conectada, muestra la pantalla de conexión */}
+        {!wallet ? (
+          <div className="connect-prompt">
+            <i className="bi bi-wallet2"></i>
+            <p>Conecta tu wallet para comenzar</p>
+            <button className="btn-primary" onClick={connectWallet}>
+              <i className="bi bi-wallet2"></i> Conectar con MetaMask
+            </button>
+          </div>
+        ) : (
+          <div className="content">
+            <div className="tabs">
+              {/* La pestaña de registro solo aparece si la wallet está autorizada */}
+              {isAuthorized && (
+                <button
+                  className={`tab ${activeTab === 'register' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('register')}
+                >
+                  <i className="bi bi-cloud-upload"></i> Registrar certificado
+                </button>
+              )}
+              <button
+                className={`tab ${activeTab === 'verify' ? 'active' : ''}`}
+                onClick={() => setActiveTab('verify')}
+              >
+                <i className="bi bi-shield-check"></i> Verificar certificado
+              </button>
+            </div>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+            {/* Panel de registro */}
+            {activeTab === 'register' && isAuthorized && (
+              <div className="card">
+                <h2><i className="bi bi-cloud-upload"></i> Registrar certificado</h2>
+                <p className="card-desc">Sube el PDF del certificado para calcular su hash y registrarlo en la blockchain.</p>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+                <label className="file-drop" htmlFor="reg-file">
+                  <i className="bi bi-file-earmark-pdf"></i>
+                  <span>{regFile ? regFile.name : 'Haz clic para seleccionar un PDF'}</span>
+                  <small>{regFile ? (regFile.size / 1024).toFixed(1) + ' KB' : 'Solo archivos PDF'}</small>
+                </label>
+                <input
+                  id="reg-file"
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => { setRegFile(e.target.files[0]); setRegStatus(null) }}
+                />
+
+                <button
+                  className="btn-primary"
+                  onClick={handleRegister}
+                  disabled={!regFile || regLoading}
+                >
+                  {regLoading
+                    ? <><i className="bi bi-hourglass-split"></i> Registrando...</>
+                    : <><i className="bi bi-cloud-upload"></i> Registrar en blockchain</>
+                  }
+                </button>
+
+                {regStatus && (
+                  <div className={`status-msg ${regStatus.type}`}>
+                    <i className={`bi ${regStatus.type === 'success' ? 'bi-check-circle' : 'bi-x-circle'}`}></i>
+                    {regStatus.msg}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Panel de verificación */}
+            {activeTab === 'verify' && (
+              <div className="card">
+                <h2><i className="bi bi-shield-check"></i> Verificar certificado</h2>
+                <p className="card-desc">Sube el PDF del certificado para comprobar si está registrado en la blockchain.</p>
+
+                <label className="file-drop" htmlFor="ver-file">
+                  <i className="bi bi-file-earmark-pdf"></i>
+                  <span>{verFile ? verFile.name : 'Haz clic para seleccionar un PDF'}</span>
+                  <small>{verFile ? (verFile.size / 1024).toFixed(1) + ' KB' : 'Solo archivos PDF'}</small>
+                </label>
+                <input
+                  id="ver-file"
+                  type="file"
+                  accept=".pdf"
+                  onChange={e => { setVerFile(e.target.files[0]); setVerStatus(null) }}
+                />
+
+                <button
+                  className="btn-primary verify"
+                  onClick={handleVerify}
+                  disabled={!verFile || verLoading}
+                >
+                  {verLoading
+                    ? <><i className="bi bi-hourglass-split"></i> Verificando...</>
+                    : <><i className="bi bi-shield-check"></i> Verificar certificado</>
+                  }
+                </button>
+
+                {verStatus && (
+                  <div className={`status-msg ${verStatus.type}`}>
+                    <i className={`bi ${verStatus.type === 'success' ? 'bi-check-circle' : 'bi-x-circle'}`}></i>
+                    {verStatus.msg}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
   )
 }
-
-export default App
