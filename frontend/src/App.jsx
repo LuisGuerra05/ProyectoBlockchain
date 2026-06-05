@@ -104,6 +104,16 @@ export default function App() {
       .join('')
   }
 
+  // Helper para identificar el tipo de error del contrato por su selector hexadecimal
+  function parseContractError(err) {
+    const data = err?.data || err?.error?.data || err?.info?.error?.data
+    const msg = err?.reason || err?.message || ''
+    if (data === '0x3a81d6fc' || msg.includes('AlreadyRegistered')) return 'AlreadyRegistered'
+    if (data === '0xea8e4eb5' || msg.includes('NotAuthorized')) return 'NotAuthorized'
+    if (data === '0x30cd7471' || msg.includes('NotOwner')) return 'NotOwner'
+    return null
+  }
+
   // Calcula el hash del PDF y envía una transacción al contrato para registrarlo
   async function handleRegister() {
     if (!regFile) return
@@ -119,13 +129,13 @@ export default function App() {
       setRegStatus({ type: 'success', msg: 'Certificado registrado exitosamente en la blockchain.' })
       setRegFile(null)
     } catch (err) {
-      const msg = err?.reason || err?.message || 'Error desconocido'
-      if (msg.includes('AlreadyRegistered')) {
+      const errorType = parseContractError(err)
+      if (errorType === 'AlreadyRegistered') {
         setRegStatus({ type: 'error', msg: 'Este certificado ya fue registrado anteriormente.' })
-      } else if (msg.includes('NotAuthorized')) {
+      } else if (errorType === 'NotAuthorized') {
         setRegStatus({ type: 'error', msg: 'Tu wallet no está autorizada para registrar certificados.' })
       } else {
-        setRegStatus({ type: 'error', msg: 'Error al registrar: ' + msg })
+        setRegStatus({ type: 'error', msg: 'Error al registrar: ' + (err?.message || 'Error desconocido') })
       }
     }
     setRegLoading(false)
@@ -170,11 +180,11 @@ export default function App() {
       setAdminStatus({ type: 'success', msg: `Wallet ${adminAddress.slice(0,6)}...${adminAddress.slice(-4)} autorizada exitosamente.` })
       setAdminAddress('')
     } catch (err) {
-      const msg = err?.reason || err?.message || 'Error desconocido'
-      if (msg.includes('NotOwner')) {
+      const errorType = parseContractError(err)
+      if (errorType === 'NotOwner') {
         setAdminStatus({ type: 'error', msg: 'Solo el owner puede autorizar wallets.' })
       } else {
-        setAdminStatus({ type: 'error', msg: 'Error al autorizar: ' + msg })
+        setAdminStatus({ type: 'error', msg: 'Error al autorizar: ' + (err?.message || 'Error desconocido') })
       }
     }
     setAdminLoading(false)
@@ -195,11 +205,11 @@ export default function App() {
       setAdminStatus({ type: 'success', msg: `Wallet ${adminAddress.slice(0,6)}...${adminAddress.slice(-4)} revocada exitosamente.` })
       setAdminAddress('')
     } catch (err) {
-      const msg = err?.reason || err?.message || 'Error desconocido'
-      if (msg.includes('NotOwner')) {
+      const errorType = parseContractError(err)
+      if (errorType === 'NotOwner') {
         setAdminStatus({ type: 'error', msg: 'Solo el owner puede revocar wallets.' })
       } else {
-        setAdminStatus({ type: 'error', msg: 'Error al revocar: ' + msg })
+        setAdminStatus({ type: 'error', msg: 'Error al revocar: ' + (err?.message || 'Error desconocido') })
       }
     }
     setAdminLoading(false)
