@@ -12,6 +12,9 @@ const CONTRACT_ABI = [
   'function authorizeIssuer(address issuer) external',
   'function revokeIssuer(address issuer) external',
   'function owner() external view returns (address)',
+  'error NotAuthorized()',
+  'error AlreadyRegistered()',
+  'error NotOwner()',
 ]
 
 export default function App() {
