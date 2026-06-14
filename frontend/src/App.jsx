@@ -38,26 +38,83 @@ export default function App() {
   const [adminStatus, setAdminStatus] = useState(null)
   const [adminLoading, setAdminLoading] = useState(false)
 
+  // Dada una dirección, consulta el contrato y devuelve si es issuer autorizado y/o owner
+  async function getWalletPermissions(address) {
+    const provider = new ethers.BrowserProvider(window.ethereum)
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
+    const authorized = await contract.authorizedIssuers(address)
+    const ownerAddress = await contract.owner()
+    const owner = ownerAddress.toLowerCase() === address.toLowerCase()
+    return { authorized, owner }
+  }
+
   // Al cargar la página, verifica si MetaMask ya tenía una sesión activa
   useEffect(() => {
     async function checkConnection() {
       if (!window.ethereum) return
       const accounts = await window.ethereum.request({ method: 'eth_accounts' })
       if (accounts.length > 0) {
-        const provider = new ethers.BrowserProvider(window.ethereum)
-        const signer = await provider.getSigner()
-        const address = await signer.getAddress()
+        const address = accounts[0]
+        const { authorized, owner } = await getWalletPermissions(address)
         setWallet(address)
-        const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
-        const authorized = await contract.authorizedIssuers(address)
         setIsAuthorized(authorized)
-        const ownerAddress = await contract.owner()
-        setIsOwner(ownerAddress.toLowerCase() === address.toLowerCase())
+        setIsOwner(owner)
         if (authorized) setActiveTab('register')
       }
     }
     checkConnection()
   }, [])
+
+  // Escucha cambios de cuenta en MetaMask y actualiza la UI sin recargar la página
+  useEffect(() => {
+    if (!window.ethereum) return
+
+    async function handleAccountsChanged(accounts) {
+      if (accounts.length === 0) {
+        // El usuario bloqueó MetaMask o revocó el permiso del sitio
+        disconnectWallet()
+        return
+      }
+      const address = accounts[0]
+      const { authorized, owner } = await getWalletPermissions(address)
+      setWallet(address)
+      setIsAuthorized(authorized)
+      setIsOwner(owner)
+      // Si la pestaña activa ya no tiene sentido para la nueva cuenta, volvemos a "Verificar"
+      setActiveTab(prev => {
+        if (prev === 'admin' && !owner) return 'verify'
+        if (prev === 'register' && !authorized) return 'verify'
+        return prev
+      })
+    }
+
+    window.ethereum.on('accountsChanged', handleAccountsChanged)
+    return () => {
+      window.ethereum.removeListener('accountsChanged', handleAccountsChanged)
+    }
+  }, [])
+
+  // MetaMask no emite 'accountsChanged' cuando solo se bloquea la extensión,
+  // así que verificamos periódicamente si la cuenta sigue disponible.
+  useEffect(() => {
+    if (!window.ethereum) return
+
+    const interval = setInterval(async () => {
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' })
+      if (accounts.length === 0) {
+        if (wallet !== null) disconnectWallet()
+      } else if (accounts[0].toLowerCase() !== wallet?.toLowerCase()) {
+        // Por si el cambio de cuenta tampoco se detectó vía accountsChanged
+        const address = accounts[0]
+        const { authorized, owner } = await getWalletPermissions(address)
+        setWallet(address)
+        setIsAuthorized(authorized)
+        setIsOwner(owner)
+      }
+    }, 1500)
+
+    return () => clearInterval(interval)
+  }, [wallet])
 
   // Solicita acceso a MetaMask, obtiene la dirección y verifica permisos en el contrato
   async function connectWallet() {
@@ -69,12 +126,10 @@ export default function App() {
       const provider = new ethers.BrowserProvider(window.ethereum)
       const signer = await provider.getSigner()
       const address = await signer.getAddress()
+      const { authorized, owner } = await getWalletPermissions(address)
       setWallet(address)
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
-      const authorized = await contract.authorizedIssuers(address)
       setIsAuthorized(authorized)
-      const ownerAddress = await contract.owner()
-      setIsOwner(ownerAddress.toLowerCase() === address.toLowerCase())
+      setIsOwner(owner)
       if (authorized) setActiveTab('register')
     } catch (err) {
       console.error(err)
@@ -82,7 +137,21 @@ export default function App() {
   }
 
   // Limpia todos los estados para simular un cierre de sesión
-  function disconnectWallet() {
+  async function disconnectWallet() {
+    // Revoca el permiso real en MetaMask (EIP-2255), para que la próxima
+    // conexión vuelva a mostrar el popup de selección de cuenta
+    try {
+      if (window.ethereum?.request) {
+        await window.ethereum.request({
+          method: 'wallet_revokePermissions',
+          params: [{ eth_accounts: {} }],
+        })
+      }
+    } catch (err) {
+      // Si la versión de MetaMask no soporta este método, lo ignoramos
+      console.warn('No se pudo revocar el permiso en MetaMask:', err)
+    }
+
     setWallet(null)
     setIsAuthorized(false)
     setIsOwner(false)
